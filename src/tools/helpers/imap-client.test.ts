@@ -85,6 +85,7 @@ function _toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  clearSentFolderCache()
   mockClient.connect.mockResolvedValue(undefined)
   mockClient.logout.mockResolvedValue(undefined)
   mockClient.getMailboxLock.mockResolvedValue({ release: mockRelease })
@@ -909,6 +910,29 @@ describe('resolveSentFolder', () => {
     const result = await resolveSentFolder(customAccount)
 
     expect(result).toBe('Sent')
+  })
+
+  it('caches the result and does not call listFolders again', async () => {
+    mockClient.list.mockResolvedValue([{ name: 'Sent', path: 'Sent', flags: new Set(['\\Sent']), delimiter: '/' }])
+
+    // First call
+    await resolveSentFolder(account)
+    expect(mockClient.list).toHaveBeenCalledTimes(1)
+
+    // Second call
+    await resolveSentFolder(account)
+    expect(mockClient.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes from cache if resolvePromise rejects', async () => {
+    // To make resolvePromise reject, we need something to throw BEFORE or OUTSIDE the inner try-catch
+    // In resolveSentFolder, if account.imap is missing, it will throw when accessing host
+    const malformedAccount = { id: 'bad-account' } as any
+
+    await expect(resolveSentFolder(malformedAccount)).rejects.toThrow()
+
+    // If it was deleted from cache in the catch block, clearSentFolderCache should return 0
+    expect(clearSentFolderCache()).toBe(0)
   })
 })
 
