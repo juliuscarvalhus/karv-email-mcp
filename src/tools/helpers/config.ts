@@ -130,43 +130,22 @@ function isSmtpSecurity(segment: string): segment is SmtpSecurity {
 }
 
 /**
- * Parse password, custom IMAP/SMTP host+port from the colon-separated
- * segments of a credential entry (`parts[0]` is the email).
- *
- * Full canonical format (closes #634 — symmetric to IMAP override):
- *   email:password:imap_host[:imap_port[:smtp_host[:smtp_port[:smtp_security]]]]
- *
- * Backward-compatible tails (most-specific first):
- *  - `...:imap_host:imap_port:smtp_host:smtp_port:smtp_security`
- *  - `...:imap_host:imap_port:smtp_host:smtp_port`
- *  - `...:imap_host:imap_port:smtp_host` (smtp uses defaults: 587 + starttls)
- *  - `...:imap_host:imap_port` -- existing behaviour, SMTP guessed
- *  - `...:imap_host`           -- existing, default IMAP port + SMTP guessed
- *  - else: whole tail is password (embedded colons preserved)
- *
- * Detection is greedy from the END so passwords with embedded colons keep
- * working when no host suffix is supplied.
+ * Helper: an "all-digit" segment looks like a port attempt (even if value
+ * is out-of-range, in which case parsePort returns undefined and the
+ * caller falls back to the protocol-default port).
  */
-function parsePasswordAndHost(parts: string[]): {
-  password: string
-  customImapHost?: string
-  customImapPort?: number
-  customSmtpHost?: string
-  customSmtpPort?: number
-  customSmtpSecurity?: SmtpSecurity
-} {
-  if (parts.length === 2) {
-    // email:password
-    return { password: parts[1]! }
-  }
+function isPortSegment(s: string): boolean {
+  return /^\d+$/.test(s)
+}
 
-  // Mutable tail; pop SMTP, then IMAP, then rest is password.
-  const tail = parts.slice(1)
+function extractSmtpSegments(tail: string[]): {
+  host?: string
+  port?: number
+  security?: SmtpSecurity
+} {
   let smtpSecurity: SmtpSecurity | undefined
   let smtpHost: string | undefined
   let smtpPort: number | undefined
-  let imapHost: string | undefined
-  let imapPort: number | undefined
 
   // 1. Optional SMTP security keyword at end (only valid when an SMTP host
   //    can also be detected; otherwise the keyword belongs to the password).
@@ -177,11 +156,6 @@ function parsePasswordAndHost(parts: string[]): {
     tail.pop()
     popped_security = true
   }
-
-  // Helper: an "all-digit" segment looks like a port attempt (even if value
-  // is out-of-range, in which case parsePort returns undefined and the
-  // caller falls back to the protocol-default port).
-  const isPortSegment = (s: string) => /^\d+$/.test(s)
 
   // 2. SMTP host + port (host:port pair). Detected only when tail has BOTH:
   //    - tail.at(-1) is all-digit (a port attempt)
@@ -209,6 +183,16 @@ function parsePasswordAndHost(parts: string[]): {
     smtpSecurity = undefined
   }
 
+  return { host: smtpHost, port: smtpPort, security: smtpSecurity }
+}
+
+function extractImapSegments(tail: string[]): {
+  host?: string
+  port?: number
+} {
+  let imapHost: string | undefined
+  let imapPort: number | undefined
+
   // 4. IMAP host + port (port may be out-of-range; resolveServerConfig
   //    falls back to default 993 when port is undefined).
   if (tail.length >= 3 && isPortSegment(tail.at(-1)!) && looksLikeHost(tail.at(-2)!)) {
@@ -220,16 +204,56 @@ function parsePasswordAndHost(parts: string[]): {
     imapHost = tail.pop()
   }
 
+  return { host: imapHost, port: imapPort }
+}
+
+/**
+ * Parse password, custom IMAP/SMTP host+port from the colon-separated
+ * segments of a credential entry (parts[0] is the email).
+ *
+ * Full canonical format (closes #634 — symmetric to IMAP override):
+ *   email:password:imap_host[:imap_port[:smtp_host[:smtp_port[:smtp_security]]]]
+ *
+ * Backward-compatible tails (most-specific first):
+ *  - ...:imap_host:imap_port:smtp_host:smtp_port:smtp_security
+ *  - ...:imap_host:imap_port:smtp_host:smtp_port
+ *  - ...:imap_host:imap_port:smtp_host (smtp uses defaults: 587 + starttls)
+ *  - ...:imap_host:imap_port -- existing behaviour, SMTP guessed
+ *  - ...:imap_host           -- existing, default IMAP port + SMTP guessed
+ *  - else: whole tail is password (embedded colons preserved)
+ *
+ * Detection is greedy from the END so passwords with embedded colons keep
+ * working when no host suffix is supplied.
+ */
+function parsePasswordAndHost(parts: string[]): {
+  password: string
+  customImapHost?: string
+  customImapPort?: number
+  customSmtpHost?: string
+  customSmtpPort?: number
+  customSmtpSecurity?: SmtpSecurity
+} {
+  if (parts.length === 2) {
+    // email:password
+    return { password: parts[1]! }
+  }
+
+  // Mutable tail; pop SMTP, then IMAP, then rest is password.
+  const tail = parts.slice(1)
+
+  const { host: customSmtpHost, port: customSmtpPort, security: customSmtpSecurity } = extractSmtpSegments(tail)
+  const { host: customImapHost, port: customImapPort } = extractImapSegments(tail)
+
   // 5. Whatever remains (after the email shift) is the password.
   const password = tail.join(':')
 
   return {
     password,
-    customImapHost: imapHost,
-    customImapPort: imapPort,
-    customSmtpHost: smtpHost,
-    customSmtpPort: smtpPort,
-    customSmtpSecurity: smtpSecurity
+    customImapHost,
+    customImapPort,
+    customSmtpHost,
+    customSmtpPort,
+    customSmtpSecurity
   }
 }
 
@@ -333,24 +357,20 @@ function resolveServerConfig(
 }
 
 /**
- * Parse a single credential entry
+ * Handle OAuth2-only email-only entry (Outlook/Hotmail/Live)
  */
-async function parseSingleCredential(entry: string): Promise<AccountConfig | null> {
-  const trimmed = entry.trim()
-  if (!trimmed) return null
+async function handleOAuth2OnlyEntry(email: string): Promise<AccountConfig | null> {
+  const account = await createOAuth2Account(email)
+  if (account) return account
 
-  const parts = trimmed.split(':')
-  const email = parts[0]!.trim()
+  console.error('Skipping invalid credential entry (expected email:password)')
+  return null
+}
 
-  // Outlook/Hotmail/Live: email-only entry is valid (OAuth2, no password needed)
-  if (parts.length < 2) {
-    const account = await createOAuth2Account(email)
-    if (account) return account
-
-    console.error('Skipping invalid credential entry (expected email:password)')
-    return null
-  }
-
+/**
+ * Handle password-based credential entry
+ */
+async function handlePasswordEntry(email: string, parts: string[]): Promise<AccountConfig | null> {
   const { password, customImapHost, customImapPort, customSmtpHost, customSmtpPort, customSmtpSecurity } =
     parsePasswordAndHost(parts)
 
@@ -381,6 +401,24 @@ async function parseSingleCredential(entry: string): Promise<AccountConfig | nul
   }
 
   return account
+}
+
+/**
+ * Parse a single credential entry
+ */
+async function parseSingleCredential(entry: string): Promise<AccountConfig | null> {
+  const trimmed = entry.trim()
+  if (!trimmed) return null
+
+  const parts = trimmed.split(':')
+  const email = parts[0]!.trim()
+
+  // Outlook/Hotmail/Live: email-only entry is valid (OAuth2, no password needed)
+  if (parts.length < 2) {
+    return handleOAuth2OnlyEntry(email)
+  }
+
+  return handlePasswordEntry(email, parts)
 }
 
 /**
