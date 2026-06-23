@@ -41,3 +41,6 @@
 ## 2025-05-18 - [V8 RegExp replacement overhead]
 **Learning:** In V8 environments (Node.js/Bun), using chained `.replace()` calls with string literal replacements is measurably faster than using a single global `.replace()` with a mapping callback for simple escaping tasks (e.g. HTML escaping). The overhead comes from V8 needing to cross the C++/JS boundary and invoke the JS callback for every regex match.
 **Action:** Always prefer chained `.replace()` with string literal replacements for simple, fixed-mapping string replacements instead of a single mapping callback, especially in hot-path or frequently called utilities.
+## 2025-05-20 - [Clean Code] Refactor createFieldGroup and Call Sites
+ **Learning:** Refactoring a function to use an options object and destructuring improves readability and maintainability.
+ **Action:** Refactored `createFieldGroup` in `src/credential-form.ts` and updated all call sites to use the new pattern.
