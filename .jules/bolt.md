@@ -41,3 +41,7 @@
 ## 2025-05-18 - [V8 RegExp replacement overhead]
 **Learning:** In V8 environments (Node.js/Bun), using chained `.replace()` calls with string literal replacements is measurably faster than using a single global `.replace()` with a mapping callback for simple escaping tasks (e.g. HTML escaping). The overhead comes from V8 needing to cross the C++/JS boundary and invoke the JS callback for every regex match.
 **Action:** Always prefer chained `.replace()` with string literal replacements for simple, fixed-mapping string replacements instead of a single mapping callback, especially in hot-path or frequently called utilities.
+
+## 2024-05-24 - [Avoid Set object allocations in tight loops]
+**Learning:** In fuzzy matching loops (like `findClosestMatch`), calculating bigrams by slicing strings and storing them in string `Set`s within nested loops allocates large amounts of objects.
+**Action:** Use mathematically deterministic combinations. Since `charCodeAt` returns a 16-bit integer, packing them into 32-bit integers using `(char1 << 16) | char2` eliminates object allocations (both strings and slice memory) and can drastically reduce the hot-path latency. Combining this with caching the lowercased strings speeds up execution.
