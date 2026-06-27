@@ -120,7 +120,7 @@ describe('isValidToolName', () => {
     expect(isValidToolName('messages')).toBe(true)
     expect(isValidToolName('folders')).toBe(true)
     expect(isValidToolName('attachments')).toBe(true)
-    expect(isValidToolName('send')).toBe(true)
+    expect(isValidToolName('draft')).toBe(true)
     expect(isValidToolName('help')).toBe(true)
   })
 
@@ -162,7 +162,7 @@ describe('wrapToolResult', () => {
 
   it('does not wrap safe tools', () => {
     expect(wrapToolResult('folders', '{"folders": []}')).toBe('{"folders": []}')
-    expect(wrapToolResult('send', '{"success": true}')).toBe('{"success": true}')
+    expect(wrapToolResult('draft', '{"saved_to_drafts": true}')).toBe('{"saved_to_drafts": true}')
     expect(wrapToolResult('help', '{"docs": ""}')).toBe('{"docs": ""}')
   })
 })

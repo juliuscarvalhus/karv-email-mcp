@@ -17,8 +17,8 @@ vi.mock('@n24q02m/mcp-core', () => ({
 // Mock composite tools (avoid IMAP/SMTP side effects)
 vi.mock('./composite/attachments.js', () => ({ attachments: vi.fn() }))
 vi.mock('./composite/folders.js', () => ({ folders: vi.fn() }))
-vi.mock('./composite/messages.js', () => ({ messages: vi.fn(), clearArchiveFolderCache: vi.fn() }))
-vi.mock('./composite/send.js', () => ({ send: vi.fn() }))
+vi.mock('./composite/messages.js', () => ({ messages: vi.fn() }))
+vi.mock('./composite/draft.js', () => ({ draft: vi.fn() }))
 vi.mock('./composite/config.js', () => ({ handleConfig: vi.fn() }))
 
 // Default credential-state mock: server starts unconfigured. Individual tests

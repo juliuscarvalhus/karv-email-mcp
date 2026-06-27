@@ -10,12 +10,10 @@ vi.mock('../../credential-state.js', () => ({
   resolveCredentialState: vi.fn()
 }))
 
-vi.mock('./messages.js', () => ({
-  clearArchiveFolderCache: vi.fn().mockReturnValue(2)
-}))
-
 vi.mock('../helpers/imap-client.js', () => ({
-  clearSentFolderCache: vi.fn().mockReturnValue(1)
+  clearSentFolderCache: vi.fn().mockReturnValue(1),
+  clearDraftsFolderCache: vi.fn().mockReturnValue(2),
+  clearSpamFolderCache: vi.fn().mockReturnValue(3)
 }))
 
 vi.mock('../helpers/oauth2.js', () => ({
@@ -23,10 +21,9 @@ vi.mock('../helpers/oauth2.js', () => ({
 }))
 
 import { getSetupUrl, getState, resetState, resolveCredentialState } from '../../credential-state.js'
-import { clearSentFolderCache } from '../helpers/imap-client.js'
+import { clearDraftsFolderCache, clearSentFolderCache, clearSpamFolderCache } from '../helpers/imap-client.js'
 import { _resetTokenCache } from '../helpers/oauth2.js'
 import { handleConfig } from './config.js'
-import { clearArchiveFolderCache } from './messages.js'
 
 const mockGetState = vi.mocked(getState)
 const mockGetSetupUrl = vi.mocked(getSetupUrl)
@@ -52,8 +49,9 @@ const accounts: AccountConfig[] = [
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(clearArchiveFolderCache).mockReturnValue(2)
   vi.mocked(clearSentFolderCache).mockReturnValue(1)
+  vi.mocked(clearDraftsFolderCache).mockReturnValue(2)
+  vi.mocked(clearSpamFolderCache).mockReturnValue(3)
 })
 
 describe('config - status', () => {
@@ -231,12 +229,13 @@ describe('config - cache_clear', () => {
     const result = await handleConfig(accounts, { action: 'cache_clear' })
 
     expect(clearSentFolderCache).toHaveBeenCalledOnce()
-    expect(clearArchiveFolderCache).toHaveBeenCalledOnce()
+    expect(clearDraftsFolderCache).toHaveBeenCalledOnce()
+    expect(clearSpamFolderCache).toHaveBeenCalledOnce()
     expect(_resetTokenCache).toHaveBeenCalledOnce()
     expect(result).toEqual({
       action: 'cache_clear',
       ok: true,
-      cleared: 3 // 1 (sent) + 2 (archive)
+      cleared: 6 // 1 (sent) + 2 (drafts) + 3 (spam)
     })
   })
 })

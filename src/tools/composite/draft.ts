@@ -191,7 +191,11 @@ async function handleForward(accounts: AccountConfig[], input: DraftInput): Prom
   }
 
   if (!input.to) {
-    throw new EmailMCPError('to is required for forward action', 'VALIDATION_ERROR', 'Provide the recipient email address')
+    throw new EmailMCPError(
+      'to is required for forward action',
+      'VALIDATION_ERROR',
+      'Provide the recipient email address'
+    )
   }
 
   const account = resolveSingleAccount(accounts, input.account)

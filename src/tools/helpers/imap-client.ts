@@ -393,9 +393,7 @@ export async function resolveSpamFolder(account: AccountConfig): Promise<string>
 
     try {
       const folders = await listFolders(account)
-      const found = folders.find(
-        (f) => f.flags.some((flag) => flag === '\\Junk') || /^(junk|spam|lixo)/i.test(f.name)
-      )
+      const found = folders.find((f) => f.flags.some((flag) => flag === '\\Junk') || /^(junk|spam|lixo)/i.test(f.name))
       if (found) spamFolder = found.path
     } catch {
       // Use default if folder listing fails

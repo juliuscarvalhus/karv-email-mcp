@@ -54,10 +54,7 @@ export async function messages(accounts: AccountConfig[], input: MessagesInput):
         return await handleReportSpam(accounts, input)
 
       default:
-        throw createUnknownActionError(
-          input.action,
-          'search, read, mark_read, mark_unread, flag, unflag, report_spam'
-        )
+        throw createUnknownActionError(input.action, 'search, read, mark_read, mark_unread, flag, unflag, report_spam')
     }
   })()
 }

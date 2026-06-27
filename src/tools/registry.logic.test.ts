@@ -7,10 +7,10 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 
 // Mock composite tools
-vi.mock('./composite/messages.js', () => ({ messages: vi.fn(), clearArchiveFolderCache: vi.fn() }))
+vi.mock('./composite/messages.js', () => ({ messages: vi.fn() }))
 vi.mock('./composite/folders.js', () => ({ folders: vi.fn() }))
 vi.mock('./composite/attachments.js', () => ({ attachments: vi.fn() }))
-vi.mock('./composite/send.js', () => ({ send: vi.fn() }))
+vi.mock('./composite/draft.js', () => ({ draft: vi.fn() }))
 vi.mock('./composite/config.js', () => ({ handleConfig: vi.fn() }))
 
 // Mock credential state to return 'configured' so tools execute normally
@@ -94,7 +94,7 @@ describe('ListToolsRequestSchema handler', () => {
 
     expect(result.tools).toHaveLength(7)
     const names = result.tools.map((t: any) => t.name)
-    expect(names).toEqual(['messages', 'folders', 'attachments', 'send', 'config', 'config__open_relay', 'help'])
+    expect(names).toEqual(['messages', 'folders', 'attachments', 'draft', 'config', 'config__open_relay', 'help'])
   })
 })
 
@@ -113,7 +113,7 @@ describe('ListResourcesRequestSchema handler', () => {
       'email://docs/messages',
       'email://docs/folders',
       'email://docs/attachments',
-      'email://docs/send',
+      'email://docs/draft',
       'email://docs/help',
       'email://docs/config'
     ]
@@ -189,22 +189,22 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.content[0].text).toBe(JSON.stringify(mockResult, null, 2))
   })
 
-  it('should call send function and return JSON result', async () => {
-    const { send } = await import('./composite/send.js')
-    const mockResult = { success: true, messageId: '<abc@test.com>' }
-    vi.mocked(send).mockResolvedValue(mockResult)
+  it('should call draft function and return JSON result', async () => {
+    const { draft } = await import('./composite/draft.js')
+    const mockResult = { action: 'new', saved_to_drafts: true, drafts_folder: 'Drafts' }
+    vi.mocked(draft).mockResolvedValue(mockResult)
 
     const { getHandler } = createMockServerWithHandlers()
     const handler = getHandler(CallToolRequestSchema)
 
     const result = await handler({
       params: {
-        name: 'send',
+        name: 'draft',
         arguments: { action: 'new', account: 'test@test.com', to: 'to@test.com', body: 'Hello' }
       }
     })
 
-    expect(send).toHaveBeenCalledWith([], {
+    expect(draft).toHaveBeenCalledWith([], {
       action: 'new',
       account: 'test@test.com',
       to: 'to@test.com',
@@ -213,7 +213,7 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
-    // send tool is NOT in EXTERNAL_CONTENT_TOOLS, so no wrapping
+    // draft tool is NOT in EXTERNAL_CONTENT_TOOLS, so no wrapping
     expect(result.content[0].text).toBe(JSON.stringify(mockResult, null, 2))
   })
 
