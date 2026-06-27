@@ -1,15 +1,15 @@
-# Better Email MCP
+# KARV Email MCP
 
-mcp-name: io.github.n24q02m/better-email-mcp
+**Safety-first IMAP/SMTP email for AI agents -- read and _prepare_, but never send, delete, or move on its own. A human stays in control of every irreversible action.**
 
-**IMAP/SMTP email for AI agents -- read, send, organize folders, and manage attachments across multiple accounts, with auto-discovery.**
+> A fork of [better-email-mcp](https://github.com/n24q02m/better-email-mcp) by n24q02m (MIT).
+> This fork deliberately **removes** destructive and auto-send capabilities so an AI can boost
+> your productivity without the risk of a hallucinated send or delete. See [Why this fork](#why-this-fork).
 
 <!-- Badge Row 1: Status -->
 [![CI](https://github.com/n24q02m/better-email-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/n24q02m/better-email-mcp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/n24q02m/better-email-mcp/graph/badge.svg?token=O2GWBWCZGF)](https://codecov.io/gh/n24q02m/better-email-mcp)
-[![npm](https://img.shields.io/npm/v/@n24q02m/better-email-mcp?logo=npm&logoColor=white)](https://www.npmjs.com/package/@n24q02m/better-email-mcp)
-[![Docker](https://img.shields.io/docker/v/n24q02m/better-email-mcp?label=docker&logo=docker&logoColor=white&sort=semver)](https://hub.docker.com/r/n24q02m/better-email-mcp)
 [![License: MIT](https://img.shields.io/github/license/n24q02m/better-email-mcp)](LICENSE)
+[![Fork of better-email-mcp](https://img.shields.io/badge/fork%20of-better--email--mcp-blue)](https://github.com/n24q02m/better-email-mcp)
 
 <!-- Badge Row 2: Tech -->
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](#)
@@ -45,6 +45,7 @@ mcp-name: io.github.n24q02m/better-email-mcp
 
 ## Table of contents
 
+- [Why this fork](#why-this-fork)
 - [Features](#features)
 - [Install](#install)
 - [Documentation](#documentation)
@@ -64,36 +65,85 @@ mcp-name: io.github.n24q02m/better-email-mcp
   <img width="380" height="200" src="https://glama.ai/mcp/servers/n24q02m/better-email-mcp/badge" alt="Better Email MCP server" />
 </a>
 
+## Why this fork
+
+KARV Email MCP exists for one reason: **let an AI read and prepare your email without ever
+being able to do something irreversible on its own.** Sending and deleting are human
+decisions -- the AI helps you get there faster, but _you_ click the button.
+
+**Hard guarantees (enforced by removing the tools, not by prompting the model):**
+
+- **No sending.** `reply`, `forward`, and `new` only ever **save a draft** to your Drafts
+  folder. You review it in your normal mail client and decide whether to send. There is no
+  code path that transmits a message.
+- **No delete, no trash, no archive.** Those actions were removed from the `messages` tool.
+  The server physically cannot delete or hide an email.
+- **Move is restricted to spam.** The only move operation is `report_spam`, which marks a
+  message as junk and moves it **only** to your spam/junk folder -- for spam, phishing, and
+  fraud. Nothing can be moved anywhere else.
+
+**Why:** AI agents hallucinate. A wrong "delete" or an auto-sent reply can be costly and
+irreversible. This fork moves the responsibility for sending and deleting back to a human,
+while the AI still does the heavy lifting: triaging the inbox, reading, and drafting replies.
+
+**On top of the safety model, this fork improves drafting:**
+
+- **Better replies & forwards** -- quoted history is included (plain-text `>` and HTML
+  `<blockquote>`) with the original date and sender; reply-to-all is the default; the original
+  HTML body is preserved when available.
+- **Your signature, automatically** -- when replying or forwarding, your own email signature
+  (HTML or plain text) can be injected into the draft.
+- **Attachment rules** -- replies carry only inline/embedded images; forwards carry all
+  original attachments.
+
 ## Features
 
 - **Multi-account support** -- manage 6+ email accounts (Gmail, Outlook, Yahoo, iCloud, Zoho, ProtonMail, custom IMAP)
-- **App Passwords** -- no OAuth2 setup required for most providers; clone and run in 1 minute
-- **5 composite tools** with 21 actions (plus `help` + `config__open_relay`) -- search, read, send, reply, forward, organize, and credential setup in single calls
+- **App Passwords** -- no OAuth2 setup required for most providers
+- **5 composite tools** (plus `help` + `config__open_relay`) -- search, read, triage, draft, reply, forward, and credential setup in single calls
 - **Auto-discovery** -- provider settings detected from email address, custom IMAP host supported
-- **Thread-aware** -- reply/forward maintains In-Reply-To and References headers
+- **Thread-aware** -- reply/forward maintains In-Reply-To and References headers, quotes history, and can inject your signature
 - **Tiered token optimization** -- compressed descriptions + on-demand `help` tool + MCP Resources
 
 ## Install
 
-The server runs in two modes: **stdio** (default, single-user, credentials from env vars) and **HTTP** (opt-in, multi-user with OAuth 2.1). For stdio, add it to your MCP client config:
+> ⚠️ This fork is **not published to npm**. Installing `@n24q02m/better-email-mcp` from
+> npm/npx gives you the _original_ server, which can send and delete. To get the safety-first
+> behavior, **build this fork from source** and point your MCP client at the built `bin/cli.mjs`.
+
+```bash
+git clone -b karv https://github.com/juliuscarvalhus/karv-email-mcp.git
+cd karv-email-mcp
+npm install
+npm run build   # produces bin/cli.mjs
+```
+
+Then add it to your MCP client config (stdio mode):
 
 ```jsonc
 {
   "mcpServers": {
-    "better-email": {
-      "command": "npx",
-      "args": ["--yes", "@n24q02m/better-email-mcp@latest"],
+    "karv-email-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/karv-email-mcp/bin/cli.mjs"],
       "env": {
-        "EMAIL_CREDENTIALS": "user@gmail.com:app-password"
+        // email:app-password (auto-discovered hosts), or full form for custom/business mail:
+        // email:password:imap_host:imap_port:smtp_host:smtp_port:ssl
+        "EMAIL_CREDENTIALS": "user@example.com:app-password"
       }
     }
   }
 }
 ```
 
-Multiple accounts are comma-separated: `user1@gmail.com:pass1,user2@outlook.com:pass2`. See [Configuration](#configuration) for all env vars, and [Remote (HTTP Mode)](#remote-http-mode) to run a hosted multi-user server.
+Multiple accounts are comma-separated. Settings (IMAP/SMTP host, port) are auto-discovered from
+the email domain for common providers; for custom/business mail, pass host/port explicitly (e.g.
+`user@company.com:pass:imap.company.com:993:smtp.company.com:465:ssl`). See
+[Configuration](#configuration) for all env vars.
 
-Most providers use an **App Password** (no OAuth setup); Outlook/Hotmail/Live use a bundled OAuth device-code flow in HTTP mode. Settings (IMAP/SMTP host, port) are auto-discovered from the email domain.
+> 💡 The companion **karv-agent** repo ships a PowerShell launcher that decrypts the password
+> from an OS-bound vault (DPAPI) and builds `EMAIL_CREDENTIALS` at runtime, so no password is
+> ever stored in the MCP config. Plain `EMAIL_CREDENTIALS` (above) also works for any MCP client.
 
 ## Documentation
 
@@ -112,10 +162,10 @@ Full docs at **[mcp.n24q02m.com/servers/better-email-mcp/setup/](https://mcp.n24
 
 | Tool | Actions | Description |
 |:-----|:--------|:------------|
-| `messages` | `search`, `read`, `mark_read`, `mark_unread`, `flag`, `unflag`, `move`, `archive`, `trash` | Search, read, and organize emails |
+| `messages` | `search`, `read`, `mark_read`, `mark_unread`, `flag`, `unflag`, `report_spam` | Search, read, and triage emails. **No `move`/`archive`/`trash`** -- `report_spam` is the only move, and only to the spam folder. |
 | `folders` | `list` | List mailbox folders |
 | `attachments` | `list`, `download` | List and download email attachments |
-| `send` | `new`, `reply`, `forward` | Compose, reply, and forward emails |
+| `draft` | `new`, `reply`, `forward` | Compose, reply, and forward -- **always saved to Drafts, never sent.** Quotes history, optional signature injection, attachment rules. |
 | `config` | `status`, `setup_start`, `setup_reset`, `setup_complete`, `set`, `cache_clear` | Credential setup via browser relay, status check, reset, re-resolve, cache clear |
 | `config__open_relay` | - | Open the relay configuration form in the browser and return the relay URL |
 | `help` | - | Get full documentation for any tool |
@@ -127,7 +177,7 @@ Full docs at **[mcp.n24q02m.com/servers/better-email-mcp/setup/](https://mcp.n24
 | `email://docs/messages` | Message operations reference |
 | `email://docs/folders` | Folder operations reference |
 | `email://docs/attachments` | Attachment operations reference |
-| `email://docs/send` | Send/compose reference |
+| `email://docs/draft` | Draft/compose reference (reply, forward, new -- saved to Drafts) |
 | `email://docs/config` | Credential setup and runtime configuration reference |
 | `email://docs/help` | Full documentation |
 
@@ -275,11 +325,16 @@ plaintext/STARTTLS -- the usual shape for a local IMAP proxy (for example
 ## Build from Source
 
 ```bash
-git clone https://github.com/n24q02m/better-email-mcp.git
-cd better-email-mcp
-bun install
-bun run dev
+git clone -b karv https://github.com/juliuscarvalhus/karv-email-mcp.git
+cd karv-email-mcp
+npm install
+npm run build   # production build -> bin/cli.mjs
+# or, for development:
+npm run dev
 ```
+
+The build keeps several runtime dependencies external, so `node_modules` must be present at
+runtime (`bin/cli.mjs` is not a fully self-contained bundle). Run `npm install` once per machine.
 
 ## Trust Model
 
