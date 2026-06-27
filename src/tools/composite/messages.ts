@@ -171,6 +171,20 @@ async function handleReportSpam(accounts: AccountConfig[], input: MessagesInput)
 
   const spamFolder = await resolveSpamFolder(account)
 
+  // Mark the message as junk BEFORE moving it. IMAP MOVE preserves keywords, so
+  // setting the flag in the source folder carries it to the spam folder. We set
+  // `$Junk` (RFC 5788 standard) and `Junk` (what Thunderbird reads) and clear the
+  // opposite markers. Best-effort: a server that rejects custom keywords must not
+  // block the move, so failures here are swallowed.
+  let markedJunk = false
+  try {
+    await modifyFlags(account, uids, folder, ['$NotJunk', 'NonJunk'], 'remove')
+    const flagResult = await modifyFlags(account, uids, folder, ['$Junk', 'Junk'], 'add')
+    markedJunk = flagResult.success
+  } catch {
+    markedJunk = false
+  }
+
   const result = await moveEmails(account, uids, folder, spamFolder)
 
   return {
@@ -178,6 +192,7 @@ async function handleReportSpam(accounts: AccountConfig[], input: MessagesInput)
     account: account.email,
     from_folder: folder,
     spam_folder: spamFolder,
+    marked_junk: markedJunk,
     ...result
   }
 }

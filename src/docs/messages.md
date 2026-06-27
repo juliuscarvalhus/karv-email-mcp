@@ -67,12 +67,18 @@ Remove star/flag from emails.
 ```
 
 ### report_spam
-Move emails to the Spam/Junk folder. This is the only move operation available.
+Mark emails as junk and move them to the Spam/Junk folder. This is the only move
+operation available.
 ```json
 {"action": "report_spam", "account": "user@dominio.com.br", "uids": [123, 456]}
 ```
-The Spam folder is detected via the IMAP `\Junk` flag, falling back to provider
-defaults (`Junk`, `Junk Email` for Outlook, `[Gmail]/Spam` for Gmail).
+Before moving, the message is marked with the `$Junk` keyword (RFC 5788) plus
+`Junk` (read by Thunderbird), and the opposite markers (`$NotJunk`/`NonJunk`) are
+cleared — so clients and the server's spam filter recognise it as junk. The mark
+is best-effort: if the server rejects custom keywords, the move still happens
+(`marked_junk: false` in the result). The Spam folder is detected via the IMAP
+`\Junk` flag, falling back to provider defaults (`Junk`, `Junk Email` for Outlook,
+`[Gmail]/Spam` for Gmail).
 
 ## Parameters
 - `action` - Action to perform (required)

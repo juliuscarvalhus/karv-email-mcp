@@ -205,6 +205,35 @@ describe('messages - report_spam', () => {
     expect(mockMoveEmails).toHaveBeenCalledWith(accounts[0], [1, 2], 'INBOX', 'Junk')
   })
 
+  it('marks the message as junk ($Junk/Junk) in the source folder before moving', async () => {
+    mockResolveSpamFolder.mockResolvedValue('Junk')
+    mockModifyFlags.mockResolvedValue({ success: true, modified: 1 })
+    mockMoveEmails.mockResolvedValue({ success: true, moved: 1 })
+
+    const result = await messages(accounts, {
+      action: 'report_spam',
+      uid: 5,
+      account: 'user1@gmail.com'
+    })
+
+    // adds the junk keywords and clears the opposite markers, in the SOURCE folder
+    expect(mockModifyFlags).toHaveBeenCalledWith(accounts[0], [5], 'INBOX', ['$NotJunk', 'NonJunk'], 'remove')
+    expect(mockModifyFlags).toHaveBeenCalledWith(accounts[0], [5], 'INBOX', ['$Junk', 'Junk'], 'add')
+    expect(result.marked_junk).toBe(true)
+  })
+
+  it('still moves to spam even if marking junk fails (best-effort)', async () => {
+    mockResolveSpamFolder.mockResolvedValue('Junk')
+    mockModifyFlags.mockRejectedValue(new Error('keywords not supported'))
+    mockMoveEmails.mockResolvedValue({ success: true, moved: 1 })
+
+    const result = await messages(accounts, { action: 'report_spam', uid: 9, account: 'user1@gmail.com' })
+
+    expect(result.marked_junk).toBe(false)
+    expect(result.spam_folder).toBe('Junk')
+    expect(mockMoveEmails).toHaveBeenCalledWith(accounts[0], [9], 'INBOX', 'Junk')
+  })
+
   it('resolves the spam folder per account (e.g. Outlook Junk Email)', async () => {
     mockResolveSpamFolder.mockResolvedValue('Junk Email')
     mockMoveEmails.mockResolvedValue({ success: true, moved: 1 })
