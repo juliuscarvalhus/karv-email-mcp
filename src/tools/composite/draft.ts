@@ -155,14 +155,25 @@ async function handleReply(accounts: AccountConfig[], input: DraftInput): Promis
   const baseSubject = input.subject || original.subject
   const subject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`
 
+  const originalDate = original.date ? new Date(original.date).toLocaleString('pt-BR') : '';
+  const originalSender = original.from || '';
+
+  // Formata o histórico em texto puro
+  const replyPrefix = `\n\nEm ${originalDate}, ${originalSender} escreveu:\n> ` + original.body_text.replace(/\r?\n/g, '\n> ');
+  const bodyText = `${input.body}${replyPrefix}`;
+
+  // Formata o histórico em HTML
+  const replyPrefixHtml = `<br><br>Em ${originalDate}, ${originalSender} escreveu:<br><blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">${textToHtml(original.body_text)}</blockquote>`;
+  const bodyHtml = `${textToHtml(input.body)}${replyPrefixHtml}`;
+
   const { saved, drafts_folder } = await saveDraft(account, {
     from: account.email,
     to: replyTo,
     cc: input.cc,
     bcc: input.bcc,
     subject,
-    text: input.body,
-    html: textToHtml(input.body),
+    text: bodyText,
+    html: bodyHtml,
     inReplyTo: original.message_id,
     references: original.references || original.message_id
   })
