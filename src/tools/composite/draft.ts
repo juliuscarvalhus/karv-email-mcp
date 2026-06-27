@@ -1,43 +1,17 @@
 /**
- * Send Mega Tool
- * Send new emails, reply, and forward via SMTP
+ * Draft Mega Tool (KARV fork)
+ * Composes new emails, replies, and forwards — and saves them to the Drafts
+ * folder via IMAP APPEND. It NEVER sends. The human reviews the draft in their
+ * mail client (webmail/Outlook) and sends it manually.
  */
 
 import type { AccountConfig } from '../helpers/config.js'
 import { resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
-import { appendToFolder, readEmail, resolveSentFolder } from '../helpers/imap-client.js'
-import type { SendResult } from '../helpers/smtp-client.js'
-import { forwardEmail, replyToEmail, sendNewEmail } from '../helpers/smtp-client.js'
+import { appendToFolder, readEmail, resolveDraftsFolder } from '../helpers/imap-client.js'
+import { buildRawMessage, textToHtml } from '../helpers/smtp-client.js'
 
-/**
- * Providers whose SMTP servers auto-save sent messages to the Sent folder.
- * IMAP APPEND on these would create duplicates.
- * - Gmail: smtp.gmail.com
- * - Yahoo: smtp.mail.yahoo.com
- * - iCloud: smtp.mail.me.com
- */
-function autoSavesToSent(account: AccountConfig): boolean {
-  const host = account.smtp.host
-  return host.includes('gmail') || host.includes('yahoo') || host.includes('mail.me')
-}
-
-/**
- * Best-effort save to Sent folder via IMAP APPEND.
- * Skips providers that auto-save (Gmail, Yahoo, iCloud).
- * Failures are silent — sending already succeeded.
- */
-async function saveToSent(account: AccountConfig, result: SendResult): Promise<boolean> {
-  if (!result.raw || autoSavesToSent(account)) return false
-  try {
-    const sentFolder = await resolveSentFolder(account)
-    return await appendToFolder(account, sentFolder, result.raw, ['\\Seen'])
-  } catch {
-    return false
-  }
-}
-
-export interface SendInput {
+export interface DraftInput {
   action: 'new' | 'reply' | 'forward'
 
   // Required for all
@@ -60,13 +34,37 @@ export interface SendInput {
 }
 
 /**
- * Unified send tool - handles all outbound email operations
+ * Build the email, append it to the Drafts folder, and report where it landed.
+ * Shared by all three actions.
  */
-export async function send(accounts: AccountConfig[], input: SendInput): Promise<any> {
+async function saveDraft(
+  account: AccountConfig,
+  mailOptions: {
+    from: string
+    to: string
+    cc?: string
+    bcc?: string
+    subject: string
+    text: string
+    html: string
+    inReplyTo?: string
+    references?: string
+  }
+): Promise<{ saved: boolean; drafts_folder: string }> {
+  const raw = await buildRawMessage(mailOptions)
+  const draftsFolder = await resolveDraftsFolder(account)
+  const saved = await appendToFolder(account, draftsFolder, raw, ['\\Draft'])
+  return { saved, drafts_folder: draftsFolder }
+}
+
+/**
+ * Unified draft tool - composes outbound email and stores it for human review.
+ */
+export async function draft(accounts: AccountConfig[], input: DraftInput): Promise<any> {
   return withErrorHandling(async () => {
     if (!input.account) {
       throw new EmailMCPError(
-        'account is required for send operations',
+        'account is required for draft operations',
         'VALIDATION_ERROR',
         'Provide the sender account email address'
       )
@@ -93,9 +91,9 @@ export async function send(accounts: AccountConfig[], input: SendInput): Promise
 }
 
 /**
- * Send a new email
+ * Draft a new email
  */
-async function handleNew(accounts: AccountConfig[], input: SendInput): Promise<any> {
+async function handleNew(accounts: AccountConfig[], input: DraftInput): Promise<any> {
   if (!input.to) {
     throw new EmailMCPError('to is required for new email', 'VALIDATION_ERROR', 'Provide the recipient email address')
   }
@@ -106,32 +104,31 @@ async function handleNew(accounts: AccountConfig[], input: SendInput): Promise<a
 
   const account = resolveSingleAccount(accounts, input.account)
 
-  const result = await sendNewEmail(account, {
+  const { saved, drafts_folder } = await saveDraft(account, {
+    from: account.email,
     to: input.to,
-    subject: input.subject,
-    body: input.body,
     cc: input.cc,
-    bcc: input.bcc
+    bcc: input.bcc,
+    subject: input.subject,
+    text: input.body,
+    html: textToHtml(input.body)
   })
-
-  const saved_to_sent = await saveToSent(account, result)
 
   return {
     action: 'new',
     from: account.email,
     to: input.to,
     subject: input.subject,
-    success: result.success,
-    message_id: result.message_id,
-    saved_to_sent
+    saved_to_drafts: saved,
+    drafts_folder
   }
 }
 
 /**
- * Reply to an email (maintains thread headers)
- * `to` is optional — defaults to the original sender's address
+ * Draft a reply (maintains thread headers).
+ * `to` is optional — defaults to the original sender's address.
  */
-async function handleReply(accounts: AccountConfig[], input: SendInput): Promise<any> {
+async function handleReply(accounts: AccountConfig[], input: DraftInput): Promise<any> {
   if (!input.uid) {
     throw new EmailMCPError(
       'uid is required for reply action',
@@ -146,9 +143,7 @@ async function handleReply(accounts: AccountConfig[], input: SendInput): Promise
   // Read original email to get threading headers + auto-derive `to`
   const original = await readEmail(account, input.uid, folder)
 
-  // Auto-derive `to` from original sender if not provided
   const replyTo = input.to || original.from
-
   if (!replyTo) {
     throw new EmailMCPError(
       'Could not determine reply-to address',
@@ -157,34 +152,36 @@ async function handleReply(accounts: AccountConfig[], input: SendInput): Promise
     )
   }
 
-  const result = await replyToEmail(account, {
+  const baseSubject = input.subject || original.subject
+  const subject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`
+
+  const { saved, drafts_folder } = await saveDraft(account, {
+    from: account.email,
     to: replyTo,
-    subject: input.subject || original.subject,
-    body: input.body,
     cc: input.cc,
     bcc: input.bcc,
-    in_reply_to: original.message_id,
+    subject,
+    text: input.body,
+    html: textToHtml(input.body),
+    inReplyTo: original.message_id,
     references: original.references || original.message_id
   })
-
-  const saved_to_sent = await saveToSent(account, result)
 
   return {
     action: 'reply',
     from: account.email,
     to: replyTo,
-    subject: input.subject || `Re: ${original.subject}`,
+    subject,
     in_reply_to: original.message_id,
-    success: result.success,
-    message_id: result.message_id,
-    saved_to_sent
+    saved_to_drafts: saved,
+    drafts_folder
   }
 }
 
 /**
- * Forward an email
+ * Draft a forward (includes the original body).
  */
-async function handleForward(accounts: AccountConfig[], input: SendInput): Promise<any> {
+async function handleForward(accounts: AccountConfig[], input: DraftInput): Promise<any> {
   if (!input.uid) {
     throw new EmailMCPError(
       'uid is required for forward action',
@@ -194,37 +191,34 @@ async function handleForward(accounts: AccountConfig[], input: SendInput): Promi
   }
 
   if (!input.to) {
-    throw new EmailMCPError(
-      'to is required for forward action',
-      'VALIDATION_ERROR',
-      'Provide the recipient email address'
-    )
+    throw new EmailMCPError('to is required for forward action', 'VALIDATION_ERROR', 'Provide the recipient email address')
   }
 
   const account = resolveSingleAccount(accounts, input.account)
   const folder = input.folder || 'INBOX'
 
-  // Read original email to include in forward
   const original = await readEmail(account, input.uid, folder)
 
-  const result = await forwardEmail(account, {
+  const baseSubject = input.subject || original.subject
+  const subject = baseSubject.startsWith('Fwd:') ? baseSubject : `Fwd: ${baseSubject}`
+  const body = `${input.body}\n\n---------- Forwarded message ----------\n${original.body_text}`
+
+  const { saved, drafts_folder } = await saveDraft(account, {
+    from: account.email,
     to: input.to,
-    subject: input.subject || original.subject,
-    body: input.body,
     cc: input.cc,
     bcc: input.bcc,
-    original_body: original.body_text
+    subject,
+    text: body,
+    html: textToHtml(body)
   })
-
-  const saved_to_sent = await saveToSent(account, result)
 
   return {
     action: 'forward',
     from: account.email,
     to: input.to,
-    subject: input.subject || `Fwd: ${original.subject}`,
-    success: result.success,
-    message_id: result.message_id,
-    saved_to_sent
+    subject,
+    saved_to_drafts: saved,
+    drafts_folder
   }
 }

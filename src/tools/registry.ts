@@ -21,9 +21,9 @@ import { buildOpenRelayHandler } from '@n24q02m/mcp-core'
 import { getSetupUrl, getState } from '../credential-state.js'
 import { type AttachmentsInput, attachments } from './composite/attachments.js'
 import { type ConfigInput, handleConfig } from './composite/config.js'
+import { type DraftInput, draft } from './composite/draft.js'
 import { type FoldersInput, folders } from './composite/folders.js'
 import { type MessagesInput, messages } from './composite/messages.js'
-import { type SendInput, send } from './composite/send.js'
 // Import mega tools
 import { type AccountConfig, loadConfig } from './helpers/config.js'
 import { aiReadableMessage, EmailMCPError, enhanceError, findClosestMatch } from './helpers/errors.js'
@@ -45,7 +45,7 @@ const RESOURCES = [
   { uri: 'email://docs/messages', name: 'Messages Tool Docs', file: 'messages.md' },
   { uri: 'email://docs/folders', name: 'Folders Tool Docs', file: 'folders.md' },
   { uri: 'email://docs/attachments', name: 'Attachments Tool Docs', file: 'attachments.md' },
-  { uri: 'email://docs/send', name: 'Send Tool Docs', file: 'send.md' },
+  { uri: 'email://docs/draft', name: 'Draft Tool Docs', file: 'draft.md' },
   { uri: 'email://docs/help', name: 'Help Tool Docs', file: 'help.md' },
   { uri: 'email://docs/config', name: 'Config Tool Docs', file: 'config.md' }
 ]
@@ -58,7 +58,7 @@ const TOOLS = [
   {
     name: 'messages',
     description:
-      'Search, read, and manage email messages.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- move (account, uid|uids, destination -> folder)\n- archive / trash (account, uid|uids -> folder)\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
+      'Search, read, and triage email messages. Cannot delete, archive or move to arbitrary folders (by design). The only move is report_spam.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- report_spam (account, uid|uids -> folder): move message(s) to the Spam/Junk folder\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
     annotations: {
       title: 'Messages',
       readOnlyHint: false,
@@ -71,7 +71,7 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['search', 'read', 'mark_read', 'mark_unread', 'flag', 'unflag', 'move', 'archive', 'trash'],
+          enum: ['search', 'read', 'mark_read', 'mark_unread', 'flag', 'unflag', 'report_spam'],
           description: 'Action to perform'
         },
         account: { type: 'string', description: 'Account email filter (optional, defaults to all for search)' },
@@ -83,8 +83,7 @@ const TOOLS = [
         folder: { type: 'string', description: 'Mailbox folder (default: INBOX)' },
         limit: { type: 'number', description: 'Max results for search (default: 20)' },
         uid: { type: 'number', description: 'Email UID (for read/modify single email)' },
-        uids: { type: 'array', items: { type: 'number' }, description: 'Multiple UIDs for batch operations' },
-        destination: { type: 'string', description: 'Target folder for move action' }
+        uids: { type: 'array', items: { type: 'number' }, description: 'Multiple UIDs for batch operations' }
       },
       required: ['action']
     }
@@ -144,15 +143,15 @@ const TOOLS = [
     }
   },
   {
-    name: 'send',
+    name: 'draft',
     description:
-      'Compose and send emails.\n\nActions (required params -> optional):\n- new (account, to, subject, body -> cc, bcc)\n- reply (account, uid, body -> to, folder): auto-derives recipient, prepends "Re:"\n- forward (account, uid, to, body -> folder): includes original, prepends "Fwd:"\n\nBody: plain text (default) or HTML (<b>, <a href>, <table>). Do NOT mix.',
+      'Compose an email and SAVE IT TO THE DRAFTS folder for human review. It NEVER sends — the person reviews the draft in their mail client and sends it themselves.\n\nActions (required params -> optional):\n- new (account, to, subject, body -> cc, bcc)\n- reply (account, uid, body -> to, folder): auto-derives recipient, prepends "Re:"\n- forward (account, uid, to, body -> folder): includes original, prepends "Fwd:"\n\nBody: plain text (default) or HTML (<b>, <a href>, <table>). Do NOT mix.',
     annotations: {
-      title: 'Send',
+      title: 'Draft',
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true
+      openWorldHint: false
     },
     inputSchema: {
       type: 'object',
@@ -172,7 +171,7 @@ const TOOLS = [
         body: {
           type: 'string',
           description:
-            'Email body (required). Use plain text for simple messages. Use HTML tags (<b>, <i>, <a href="...">, <br>, <table>) for rich formatting. Do NOT mix: send either plain text or HTML, not both.'
+            'Email body (required). Use plain text for simple messages. Use HTML tags (<b>, <i>, <a href="...">, <br>, <table>) for rich formatting. Do NOT mix: use either plain text or HTML, not both.'
         },
         cc: { type: 'string', description: 'CC recipients (comma-separated)' },
         bcc: { type: 'string', description: 'BCC recipients (comma-separated)' },
@@ -237,7 +236,7 @@ const TOOLS = [
       properties: {
         tool_name: {
           type: 'string',
-          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'help'],
+          enum: ['messages', 'folders', 'attachments', 'draft', 'config', 'help'],
           description: 'Tool to get documentation for'
         }
       },
@@ -256,7 +255,7 @@ async function handleHelp(args: unknown): Promise<{ tool: string; documentation:
     throw new EmailMCPError(
       `Invalid tool name: ${toolName}`,
       'VALIDATION_ERROR',
-      'Valid: messages, folders, attachments, send, config, help'
+      'Valid: messages, folders, attachments, draft, config, help'
     )
   }
   const resource = RESOURCES.find((r) => r.uri === `email://docs/${toolName}`)
@@ -277,7 +276,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   messages: (accounts, args) => messages(accounts, args as unknown as MessagesInput),
   folders: (accounts, args) => folders(accounts, args as unknown as FoldersInput),
   attachments: (accounts, args) => attachments(accounts, args as unknown as AttachmentsInput),
-  send: (accounts, args) => send(accounts, args as unknown as SendInput),
+  draft: (accounts, args) => draft(accounts, args as unknown as DraftInput),
   config: (accounts, args) => handleConfig(accounts, args as unknown as ConfigInput),
   help: (_, args) => handleHelp(args)
 }

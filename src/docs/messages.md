@@ -1,7 +1,10 @@
 # Messages Tool - Full Documentation
 
 ## Overview
-Email messages: search, read, mark_read, mark_unread, flag, unflag, move, archive, trash.
+Email messages: search, read, mark_read, mark_unread, flag, unflag, report_spam.
+
+> This fork has **no** delete, archive, or generic move — by design (safety). The
+> only move available is `report_spam`, which sends a message to the Spam/Junk folder.
 
 ## Important
 - **search** defaults to all configured accounts. Filter with `account` param.
@@ -63,23 +66,13 @@ Remove star/flag from emails.
 {"action": "unflag", "account": "user@gmail.com", "uid": 123}
 ```
 
-### move
-Move emails to another folder.
+### report_spam
+Move emails to the Spam/Junk folder. This is the only move operation available.
 ```json
-{"action": "move", "account": "user@gmail.com", "uids": [123], "destination": "[Gmail]/Important"}
+{"action": "report_spam", "account": "user@dominio.com.br", "uids": [123, 456]}
 ```
-
-### archive
-Archive emails (auto-detects archive folder per provider).
-```json
-{"action": "archive", "account": "user@gmail.com", "uids": [123, 456]}
-```
-
-### trash
-Delete emails (moves to trash).
-```json
-{"action": "trash", "account": "user@gmail.com", "uid": 123}
-```
+The Spam folder is detected via the IMAP `\Junk` flag, falling back to provider
+defaults (`Junk`, `Junk Email` for Outlook, `[Gmail]/Spam` for Gmail).
 
 ## Parameters
 - `action` - Action to perform (required)
@@ -89,4 +82,3 @@ Delete emails (moves to trash).
 - `limit` - Max search results (default: 20)
 - `uid` - Single email UID
 - `uids` - Multiple email UIDs for batch operations
-- `destination` - Target folder for move action

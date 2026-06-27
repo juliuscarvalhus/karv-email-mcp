@@ -1,25 +1,17 @@
 /**
- * Messages Mega Tool
- * All email message operations in one unified interface
+ * Messages Mega Tool (KARV fork)
+ * Read-and-triage email operations. By design this tool CANNOT delete, archive
+ * or move messages to arbitrary folders. The only move allowed is `report_spam`,
+ * which sends a message to the Spam/Junk folder.
  */
 
 import type { AccountConfig } from '../helpers/config.js'
 import { resolveAccounts, resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
-import { listFolders, modifyFlags, moveEmails, readEmail, searchEmails, trashEmails } from '../helpers/imap-client.js'
-
-// Simple in-memory cache for archive folder paths to avoid repeated IMAP calls
-const archiveFolderCache = new Map<string, Promise<string>>()
-
-/** Clear the archive folder path cache */
-export function clearArchiveFolderCache(): number {
-  const count = archiveFolderCache.size
-  archiveFolderCache.clear()
-  return count
-}
+import { modifyFlags, moveEmails, readEmail, resolveSpamFolder, searchEmails } from '../helpers/imap-client.js'
 
 export interface MessagesInput {
-  action: 'search' | 'read' | 'mark_read' | 'mark_unread' | 'flag' | 'unflag' | 'move' | 'archive' | 'trash'
+  action: 'search' | 'read' | 'mark_read' | 'mark_unread' | 'flag' | 'unflag' | 'report_spam'
 
   // Target account (optional - defaults to all for search, first for others)
   account?: string
@@ -32,13 +24,10 @@ export interface MessagesInput {
   // Read/modify params
   uid?: number
   uids?: number[]
-
-  // Move params
-  destination?: string
 }
 
 /**
- * Unified messages tool - handles all message operations
+ * Unified messages tool - handles read and triage operations
  */
 export async function messages(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
   return withErrorHandling(async () => {
@@ -61,19 +50,13 @@ export async function messages(accounts: AccountConfig[], input: MessagesInput):
       case 'unflag':
         return await handleUnflag(accounts, input)
 
-      case 'move':
-        return await handleMove(accounts, input)
-
-      case 'archive':
-        return await handleArchive(accounts, input)
-
-      case 'trash':
-        return await handleTrash(accounts, input)
+      case 'report_spam':
+        return await handleReportSpam(accounts, input)
 
       default:
         throw createUnknownActionError(
           input.action,
-          'search, read, mark_read, mark_unread, flag, unflag, move, archive, trash'
+          'search, read, mark_read, mark_unread, flag, unflag, report_spam'
         )
     }
   })()
@@ -176,137 +159,28 @@ async function handleUnflag(accounts: AccountConfig[], input: MessagesInput): Pr
 }
 
 /**
- * Move emails to another folder
+ * Report emails as spam (move to the Spam/Junk folder).
+ * This is the ONLY move operation this fork exposes — there is no generic move,
+ * archive, trash or delete, by design (safety).
  */
-async function handleMove(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
+async function handleReportSpam(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
   const uids = input.uids || (input.uid ? [input.uid] : [])
   if (uids.length === 0) {
     throw new EmailMCPError('uid or uids required', 'VALIDATION_ERROR', 'Provide at least one email UID')
   }
 
-  if (!input.destination) {
-    throw new EmailMCPError(
-      'destination is required for move action',
-      'VALIDATION_ERROR',
-      'Provide the target folder name. Use folders tool to list available folders.'
-    )
-  }
-
   const account = resolveSingleAccount(accounts, input.account)
   const folder = input.folder || 'INBOX'
 
-  const result = await moveEmails(account, uids, folder, input.destination)
+  const spamFolder = await resolveSpamFolder(account)
+
+  const result = await moveEmails(account, uids, folder, spamFolder)
 
   return {
-    action: 'move',
+    action: 'report_spam',
     account: account.email,
     from_folder: folder,
-    to_folder: input.destination,
-    ...result
-  }
-}
-
-// ⚡ Bolt: Extract regular expressions into module-scoped constants to prevent
-// repeated recompilation and garbage collection on every function call.
-// This yields a measurable execution speedup during high-frequency folder processing.
-const ARCHIVE_PATH_REGEX = /archive|all mail/i
-const ARCHIVE_FLAG_REGEX = /archive|all/i
-
-/**
- * Check if a folder is an archive folder based on path or flags
- */
-function isArchiveFolder(folder: { path: string; flags: string[] }): boolean {
-  if (ARCHIVE_PATH_REGEX.test(folder.path)) {
-    return true
-  }
-  return folder.flags.some((flag) => ARCHIVE_FLAG_REGEX.test(flag))
-}
-
-/**
- * Resolve the archive folder path for the given account.
- * Uses provider-specific defaults, then verifies via IMAP folder listing.
- * Results are cached per account.
- */
-async function resolveArchiveFolder(account: AccountConfig): Promise<string> {
-  const cached = archiveFolderCache.get(account.id)
-  if (cached) return cached
-
-  const resolvePromise = (async () => {
-    // Detect archive folder based on provider
-    let archiveFolder = '[Gmail]/All Mail'
-    if (account.imap.host.includes('office365') || account.imap.host.includes('outlook')) {
-      archiveFolder = 'Archive'
-    } else if (account.imap.host.includes('yahoo')) {
-      archiveFolder = 'Archive'
-    }
-
-    // Try to find actual archive folder
-    try {
-      const folders = await listFolders(account)
-      const found = folders.find(isArchiveFolder)
-      if (found) {
-        archiveFolder = found.path
-      }
-    } catch {
-      // Use default if folder listing fails
-    }
-
-    return archiveFolder
-  })()
-
-  archiveFolderCache.set(account.id, resolvePromise)
-
-  try {
-    return await resolvePromise
-  } catch (err) {
-    archiveFolderCache.delete(account.id)
-    throw err
-  }
-}
-
-/**
- * Archive emails (move to archive folder)
- */
-async function handleArchive(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
-  const uids = input.uids || (input.uid ? [input.uid] : [])
-  if (uids.length === 0) {
-    throw new EmailMCPError('uid or uids required', 'VALIDATION_ERROR', 'Provide at least one email UID')
-  }
-
-  const account = resolveSingleAccount(accounts, input.account)
-  const folder = input.folder || 'INBOX'
-
-  const archiveFolder = await resolveArchiveFolder(account)
-
-  const result = await moveEmails(account, uids, folder, archiveFolder)
-
-  return {
-    action: 'archive',
-    account: account.email,
-    from_folder: folder,
-    archive_folder: archiveFolder,
-    ...result
-  }
-}
-
-/**
- * Trash emails
- */
-async function handleTrash(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
-  const uids = input.uids || (input.uid ? [input.uid] : [])
-  if (uids.length === 0) {
-    throw new EmailMCPError('uid or uids required', 'VALIDATION_ERROR', 'Provide at least one email UID')
-  }
-
-  const account = resolveSingleAccount(accounts, input.account)
-  const folder = input.folder || 'INBOX'
-
-  const result = await trashEmails(account, uids, folder)
-
-  return {
-    action: 'trash',
-    account: account.email,
-    folder,
+    spam_folder: spamFolder,
     ...result
   }
 }

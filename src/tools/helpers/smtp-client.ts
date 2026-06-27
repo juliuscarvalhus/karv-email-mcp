@@ -70,7 +70,7 @@ export function textToHtml(text: string): string {
  * Build a raw RFC2822 message using Nodemailer's MailComposer.
  * Returns the exact bytes that can be sent via SMTP and/or appended to IMAP.
  */
-async function buildRawMessage(mailOptions: {
+export async function buildRawMessage(mailOptions: {
   from: string
   to: string
   cc?: string

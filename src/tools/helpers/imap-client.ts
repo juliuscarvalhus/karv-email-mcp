@@ -312,6 +312,108 @@ export async function resolveSentFolder(account: AccountConfig): Promise<string>
   }
 }
 
+// ============================================================================
+// Drafts Folder (KARV: save composed messages without sending)
+// ============================================================================
+
+/** Cache for resolved drafts folder paths per account */
+const draftsFolderCache = new Map<string, Promise<string>>()
+
+/** Clear the drafts folder path cache */
+export function clearDraftsFolderCache(): number {
+  const count = draftsFolderCache.size
+  draftsFolderCache.clear()
+  return count
+}
+
+/**
+ * Resolve the Drafts folder path for the given account.
+ * Detects via the IMAP `\Drafts` special-use flag, with provider defaults.
+ */
+export async function resolveDraftsFolder(account: AccountConfig): Promise<string> {
+  const cached = draftsFolderCache.get(account.id)
+  if (cached) return cached
+
+  const resolvePromise = (async () => {
+    let draftsFolder = 'Drafts'
+    if (account.imap.host.includes('gmail')) {
+      draftsFolder = '[Gmail]/Drafts'
+    }
+
+    try {
+      const folders = await listFolders(account)
+      const found = folders.find((f) => f.flags.some((flag) => flag === '\\Drafts') || f.path === draftsFolder)
+      if (found) draftsFolder = found.path
+    } catch {
+      // Use default if folder listing fails
+    }
+
+    return draftsFolder
+  })()
+
+  draftsFolderCache.set(account.id, resolvePromise)
+
+  try {
+    return await resolvePromise
+  } catch (err) {
+    draftsFolderCache.delete(account.id)
+    throw err
+  }
+}
+
+// ============================================================================
+// Spam / Junk Folder (KARV: the only allowed move destination)
+// ============================================================================
+
+/** Cache for resolved spam folder paths per account */
+const spamFolderCache = new Map<string, Promise<string>>()
+
+/** Clear the spam folder path cache */
+export function clearSpamFolderCache(): number {
+  const count = spamFolderCache.size
+  spamFolderCache.clear()
+  return count
+}
+
+/**
+ * Resolve the Spam/Junk folder path for the given account.
+ * Detects via the IMAP `\Junk` special-use flag, with provider defaults.
+ */
+export async function resolveSpamFolder(account: AccountConfig): Promise<string> {
+  const cached = spamFolderCache.get(account.id)
+  if (cached) return cached
+
+  const resolvePromise = (async () => {
+    let spamFolder = 'Junk'
+    if (account.imap.host.includes('gmail')) {
+      spamFolder = '[Gmail]/Spam'
+    } else if (account.imap.host.includes('office365') || account.imap.host.includes('outlook')) {
+      spamFolder = 'Junk Email'
+    }
+
+    try {
+      const folders = await listFolders(account)
+      const found = folders.find(
+        (f) => f.flags.some((flag) => flag === '\\Junk') || /^(junk|spam|lixo)/i.test(f.name)
+      )
+      if (found) spamFolder = found.path
+    } catch {
+      // Use default if folder listing fails
+    }
+
+    return spamFolder
+  })()
+
+  spamFolderCache.set(account.id, resolvePromise)
+
+  try {
+    return await resolvePromise
+  } catch (err) {
+    spamFolderCache.delete(account.id)
+    throw err
+  }
+}
+
 /**
  * Append a raw RFC2822 message to an IMAP folder.
  * Used to save sent emails to the Sent folder.

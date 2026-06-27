@@ -15,9 +15,8 @@ import type { CredentialState } from '../../credential-state.js'
 import { getSetupUrl, getState, resetState, resolveCredentialState } from '../../credential-state.js'
 import type { AccountConfig } from '../helpers/config.js'
 import { createUnknownActionError, withErrorHandling } from '../helpers/errors.js'
-import { clearSentFolderCache } from '../helpers/imap-client.js'
+import { clearDraftsFolderCache, clearSentFolderCache, clearSpamFolderCache } from '../helpers/imap-client.js'
 import { _resetTokenCache } from '../helpers/oauth2.js'
-import { clearArchiveFolderCache } from './messages.js'
 
 export interface ConfigInput {
   action: 'status' | 'setup_start' | 'setup_reset' | 'setup_complete' | 'set' | 'cache_clear'
@@ -168,9 +167,10 @@ function handleSet(): ConfigSetResult {
 
 function handleCacheClear(): ConfigCacheClearResult {
   const sentCount = clearSentFolderCache()
-  const archiveCount = clearArchiveFolderCache()
+  const draftsCount = clearDraftsFolderCache()
+  const spamCount = clearSpamFolderCache()
   _resetTokenCache()
-  const cleared = sentCount + archiveCount
+  const cleared = sentCount + draftsCount + spamCount
   return {
     action: 'cache_clear',
     ok: true,
