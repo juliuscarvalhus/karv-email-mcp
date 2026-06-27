@@ -44,7 +44,9 @@ export interface EmailDetail {
   date: string
   flags: string[]
   body_text: string
+  body_html?: string
   attachments: AttachmentInfo[]
+  raw_attachments?: any[]
 }
 
 export interface AttachmentInfo {
@@ -559,12 +561,14 @@ export async function readEmail(account: AccountConfig, uid: number, folder: str
     date: parsed.date?.toISOString() || '',
     flags: Array.from(fetchResult.flags || []),
     body_text: bodyText,
+    body_html: typeof parsed.html === 'string' ? parsed.html : undefined,
     attachments: (parsed.attachments || []).map((att: Attachment) => ({
       filename: att.filename || 'unnamed',
       content_type: att.contentType || 'application/octet-stream',
       size: att.size || 0,
       content_id: att.contentId
-    }))
+    })),
+    raw_attachments: parsed.attachments || []
   }
 }
 

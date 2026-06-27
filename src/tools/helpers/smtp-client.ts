@@ -80,6 +80,7 @@ export async function buildRawMessage(mailOptions: {
   html: string
   inReplyTo?: string
   references?: string
+  attachments?: any[]
 }): Promise<Buffer> {
   // Dynamic import to avoid TypeScript issues with Nodemailer's internal module
   const { default: MailComposer } = await import('nodemailer/lib/mail-composer/index.js')
