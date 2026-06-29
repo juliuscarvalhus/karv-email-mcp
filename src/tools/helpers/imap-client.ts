@@ -3,6 +3,9 @@
  * Manages connections to multiple IMAP servers with connection pooling
  */
 
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 import { type FetchMessageObject, ImapFlow, type ListResponse, type SearchObject } from 'imapflow'
 import {
   type AddressObject,
@@ -594,6 +597,154 @@ export async function modifyFlags(
       return { success: true, modified: uids.length }
     } finally {
       lock.release()
+    }
+  })
+}
+
+/**
+ * Reconcile sent mail against a target folder.
+ *
+ * For each recently sent message that is a reply or forward (i.e. carries an
+ * `In-Reply-To` header), find the original message in the target folder by
+ * Message-ID and mark it `\Answered` (replies) or `$Forwarded` (forwards) —
+ * mirroring what a desktop mail client (e.g. Thunderbird) does on send.
+ *
+ * This lets the inbox reflect what was actually answered/forwarded even when the
+ * message went out from a Karv draft or webmail (which don't set those flags).
+ *
+ * Read + flag only. Never moves or deletes. Idempotent: originals that already
+ * carry the wanted flag are skipped.
+ */
+const REPLY_SUBJECT_RE = /^\s*(re|res|aw|sv)\s*:/i
+const FORWARD_SUBJECT_RE = /^\s*(fwd?|fw|enc|encaminhada|rv|wg|tr)\s*:/i
+
+function flagForSubject(subject: string | undefined): '\\Answered' | '$Forwarded' {
+  const s = (subject || '').trim()
+  if (REPLY_SUBJECT_RE.test(s)) return '\\Answered'
+  if (FORWARD_SUBJECT_RE.test(s)) return '$Forwarded'
+  // Has In-Reply-To but no recognizable prefix -> safest to treat as a reply.
+  return '\\Answered'
+}
+
+export interface ReconcileResult {
+  scanned: number
+  marked: { uid: number; flag: string; subject: string }[]
+  already_marked: number
+  original_not_in_folder: number
+  sent_folder: string
+  target_folder: string
+}
+
+// Watermark: how far into each account's Sent folder we already reconciled, so
+// repeat runs read only newly-sent mail instead of re-scanning the whole window.
+interface ReconcileState {
+  [key: string]: { uidValidity: string; lastUid: number }
+}
+
+function reconcileStatePath(): string {
+  return path.join(os.homedir(), '.karv', 'reconcile-state.json')
+}
+
+function readReconcileState(): ReconcileState {
+  try {
+    return JSON.parse(fs.readFileSync(reconcileStatePath(), 'utf-8')) as ReconcileState
+  } catch {
+    return {}
+  }
+}
+
+function writeReconcileState(state: ReconcileState): void {
+  try {
+    const file = reconcileStatePath()
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(state), 'utf-8')
+  } catch {
+    // Best-effort: a failed watermark write must never break reconciliation.
+  }
+}
+
+export async function reconcileSent(
+  account: AccountConfig,
+  options?: { sentLimit?: number; targetFolder?: string }
+): Promise<ReconcileResult> {
+  const sentLimit = options?.sentLimit ?? 50
+  const targetFolder = options?.targetFolder ?? 'INBOX'
+  const sentFolder = await resolveSentFolder(account)
+  const stateKey = `${account.id}::${sentFolder}`
+  const state = readReconcileState()
+  const prev = state[stateKey]
+
+  return withConnection(account, async (client) => {
+    // 1) Collect sent replies/forwards (In-Reply-To + subject). A UID watermark
+    //    makes each run read only mail sent since the last reconcile; the first
+    //    run (or a UIDVALIDITY change) bootstraps the last `sentLimit` messages.
+    const sent: { irt: string; flag: string; subject: string }[] = []
+    let uidValidity = ''
+    let maxUid = 0
+    const sentLock = await client.getMailboxLock(sentFolder)
+    try {
+      const mailbox = client.mailbox
+      const total = mailbox && typeof mailbox !== 'boolean' ? mailbox.exists : 0
+      uidValidity =
+        mailbox && typeof mailbox !== 'boolean' && mailbox.uidValidity != null ? String(mailbox.uidValidity) : ''
+      const lastUid = prev && prev.uidValidity === uidValidity ? prev.lastUid : 0
+      maxUid = lastUid
+      if (total > 0) {
+        const useUid = lastUid > 0
+        const range = useUid ? `${lastUid + 1}:*` : `${Math.max(1, total - sentLimit + 1)}:${total}`
+        const fetchOptions = useUid ? { uid: true } : undefined
+        for await (const msg of client.fetch(range, { uid: true, envelope: true }, fetchOptions)) {
+          // Guard against the IMAP `N:*` quirk (returns the highest msg when N > max).
+          if (useUid && msg.uid <= lastUid) continue
+          if (msg.uid > maxUid) maxUid = msg.uid
+          const irt = msg.envelope?.inReplyTo
+          if (!irt) continue
+          sent.push({ irt, flag: flagForSubject(msg.envelope?.subject), subject: msg.envelope?.subject || '' })
+        }
+      }
+    } finally {
+      sentLock.release()
+    }
+
+    // 2) Match each to its original in the target folder and add the flag.
+    const marked: { uid: number; flag: string; subject: string }[] = []
+    let alreadyMarked = 0
+    let notInFolder = 0
+    const targetLock = await client.getMailboxLock(targetFolder)
+    try {
+      for (const item of sent) {
+        const found = (await client.search({ header: { 'message-id': item.irt } }, { uid: true })) as number[] | false
+        if (!found || found.length === 0) {
+          notInFolder++
+          continue
+        }
+        const uid = found[found.length - 1]!
+        const detail = await client.fetchOne(`${uid}`, { uid: true, flags: true }, { uid: true })
+        const flags = detail && typeof detail !== 'boolean' ? Array.from(detail.flags || []) : []
+        if (flags.includes(item.flag)) {
+          alreadyMarked++
+          continue
+        }
+        await client.messageFlagsAdd({ uid: `${uid}` }, [item.flag], { uid: true })
+        marked.push({ uid, flag: item.flag, subject: item.subject })
+      }
+    } finally {
+      targetLock.release()
+    }
+
+    // 3) Advance the watermark so the next run skips what we just scanned.
+    if (maxUid > 0 && (prev?.lastUid !== maxUid || prev?.uidValidity !== uidValidity)) {
+      state[stateKey] = { uidValidity, lastUid: maxUid }
+      writeReconcileState(state)
+    }
+
+    return {
+      scanned: sent.length,
+      marked,
+      already_marked: alreadyMarked,
+      original_not_in_folder: notInFolder,
+      sent_folder: sentFolder,
+      target_folder: targetFolder
     }
   })
 }

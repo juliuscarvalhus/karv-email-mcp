@@ -58,7 +58,7 @@ const TOOLS = [
   {
     name: 'messages',
     description:
-      'Search, read, and triage email messages. Cannot delete, archive or move to arbitrary folders (by design). The only move is report_spam.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- report_spam (account, uid|uids -> folder): move message(s) to the Spam/Junk folder\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
+      'Search, read, and triage email messages. Cannot delete, archive or move to arbitrary folders (by design). The only move is report_spam.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20, reconcile=false)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- report_spam (account, uid|uids -> folder): move message(s) to the Spam/Junk folder\n- reconcile (-> account, folder="INBOX"): scan the Sent folder and mark the originals in `folder` as answered/forwarded based on what actually went out (so the inbox shows the replied/forwarded icons even when sent from a draft/webmail). Read + flag only. Incremental (only mail sent since the last run, via a saved watermark); returns counts only.\n\nTip: for triage, call search with reconcile=true to reconcile AND list in a single call (emits at most `reconciled: <count>`, only when something was newly marked).\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
     annotations: {
       title: 'Messages',
       readOnlyHint: false,
@@ -71,10 +71,15 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['search', 'read', 'mark_read', 'mark_unread', 'flag', 'unflag', 'report_spam'],
+          enum: ['search', 'read', 'mark_read', 'mark_unread', 'flag', 'unflag', 'report_spam', 'reconcile'],
           description: 'Action to perform'
         },
         account: { type: 'string', description: 'Account email filter (optional, defaults to all for search)' },
+        reconcile: {
+          type: 'boolean',
+          description:
+            'For search: when true, first reconcile sent mail (mark originals in `folder` as answered/forwarded from the Sent folder) so the listing reflects what already went out. Incremental (only new sent mail since last run) and silent — adds at most `reconciled: <count>`, and only when something was newly marked. Default false.'
+        },
         query: {
           type: 'string',
           description:

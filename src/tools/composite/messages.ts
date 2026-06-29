@@ -8,10 +8,17 @@
 import type { AccountConfig } from '../helpers/config.js'
 import { resolveAccounts, resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
-import { modifyFlags, moveEmails, readEmail, resolveSpamFolder, searchEmails } from '../helpers/imap-client.js'
+import {
+  modifyFlags,
+  moveEmails,
+  readEmail,
+  reconcileSent,
+  resolveSpamFolder,
+  searchEmails
+} from '../helpers/imap-client.js'
 
 export interface MessagesInput {
-  action: 'search' | 'read' | 'mark_read' | 'mark_unread' | 'flag' | 'unflag' | 'report_spam'
+  action: 'search' | 'read' | 'mark_read' | 'mark_unread' | 'flag' | 'unflag' | 'report_spam' | 'reconcile'
 
   // Target account (optional - defaults to all for search, first for others)
   account?: string
@@ -20,6 +27,10 @@ export interface MessagesInput {
   query?: string
   folder?: string
   limit?: number
+
+  // When true on a `search`, reconcile sent mail first (mark originals in
+  // `folder` as answered/forwarded) so the listing reflects what already went out.
+  reconcile?: boolean
 
   // Read/modify params
   uid?: number
@@ -53,8 +64,14 @@ export async function messages(accounts: AccountConfig[], input: MessagesInput):
       case 'report_spam':
         return await handleReportSpam(accounts, input)
 
+      case 'reconcile':
+        return await handleReconcile(accounts, input)
+
       default:
-        throw createUnknownActionError(input.action, 'search, read, mark_read, mark_unread, flag, unflag, report_spam')
+        throw createUnknownActionError(
+          input.action,
+          'search, read, mark_read, mark_unread, flag, unflag, report_spam, reconcile'
+        )
     }
   })()
 }
@@ -68,16 +85,57 @@ async function handleSearch(accounts: AccountConfig[], input: MessagesInput): Pr
   const folder = input.folder || 'INBOX'
   const limit = input.limit || 20
 
+  // Optionally reconcile sent mail first so the listing already reflects what was
+  // answered/forwarded (matched originals come back with \Answered/$Forwarded set).
+  // Token-light by design: emit at most a single `reconciled: <count>` and ONLY
+  // when something was newly marked. Best-effort — a reconcile failure must never
+  // block the search (it's logged to stderr, never surfaced to the model).
+  let reconciledCount = 0
+  if (input.reconcile) {
+    for (const a of targetAccounts) {
+      try {
+        const r = await reconcileSent(a, { targetFolder: folder })
+        reconciledCount += r.marked.length
+      } catch (error: unknown) {
+        console.error(`[reconcile] ${a.email}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
   const results = await searchEmails(targetAccounts, query, folder, limit)
 
   return {
     action: 'search',
     query,
     folder,
+    ...(reconciledCount > 0 ? { reconciled: reconciledCount } : {}),
     total: results.length,
     accounts_searched: targetAccounts.map((a) => a.email),
     messages: results
   }
+}
+
+/**
+ * Reconcile sent mail: mark originals in `folder` (default INBOX) as
+ * answered/forwarded based on what actually went out (the Sent folder).
+ * Read + flag only — never moves or deletes.
+ */
+async function handleReconcile(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
+  const targetAccounts = resolveAccounts(accounts, input.account)
+  const folder = input.folder || 'INBOX'
+
+  let answered = 0
+  let forwarded = 0
+  let scanned = 0
+  for (const a of targetAccounts) {
+    const r = await reconcileSent(a, { targetFolder: folder })
+    answered += r.marked.filter((m) => m.flag === '\\Answered').length
+    forwarded += r.marked.filter((m) => m.flag === '$Forwarded').length
+    scanned += r.scanned
+  }
+
+  // Lean by design: counts only (no per-message list).
+  return { action: 'reconcile', folder, marked: answered + forwarded, answered, forwarded, scanned }
 }
 
 /**
