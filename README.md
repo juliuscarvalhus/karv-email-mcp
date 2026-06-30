@@ -95,6 +95,14 @@ while the AI still does the heavy lifting: triaging the inbox, reading, and draf
   (HTML or plain text) can be injected into the draft.
 - **Attachment rules** -- replies carry only inline/embedded images; forwards carry all
   original attachments.
+- **Answered / Forwarded reconciliation** -- a draft you finish and send from your _own_ mail
+  client won't flag the original as answered/forwarded, because the headers that trigger that
+  are client- and account-specific (not portable). So the server reconciles against your
+  **Sent** folder instead: it reads newly-sent messages and sets `\Answered` (subject `Re:`) or
+  `$Forwarded` (subject `Fwd:`/`Enc:`) on the matching original, found by `Message-ID`.
+  Read-and-flag only, idempotent -- it never moves or deletes. Exposed as the `reconcile` action
+  and as `reconcile: true` on `search` (one round-trip; a per-account watermark scans only _new_
+  Sent items, so it stays token-cheap).
 
 ## Features
 
@@ -162,7 +170,7 @@ Full docs at **[mcp.n24q02m.com/servers/better-email-mcp/setup/](https://mcp.n24
 
 | Tool | Actions | Description |
 |:-----|:--------|:------------|
-| `messages` | `search`, `read`, `mark_read`, `mark_unread`, `flag`, `unflag`, `report_spam` | Search, read, and triage emails. **No `move`/`archive`/`trash`** -- `report_spam` is the only move, and only to the spam folder. |
+| `messages` | `search`, `read`, `mark_read`, `mark_unread`, `flag`, `unflag`, `report_spam`, `reconcile` | Search, read, and triage emails; `reconcile` flags originals as answered/forwarded from your Sent folder (also available as `reconcile: true` on `search`). **No `move`/`archive`/`trash`** -- `report_spam` is the only move, and only to the spam folder. |
 | `folders` | `list` | List mailbox folders |
 | `attachments` | `list`, `download` | List and download email attachments |
 | `draft` | `new`, `reply`, `forward` | Compose, reply, and forward -- **always saved to Drafts, never sent.** Quotes history, optional signature injection, attachment rules. |
