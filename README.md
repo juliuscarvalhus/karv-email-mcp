@@ -91,8 +91,13 @@ while the AI still does the heavy lifting: triaging the inbox, reading, and draf
 - **Better replies & forwards** -- quoted history is included (plain-text `>` and HTML
   `<blockquote>`) with the original date and sender; reply-to-all is the default; the original
   HTML body is preserved when available.
-- **Your signature, automatically** -- when replying or forwarding, your own email signature
-  (HTML or plain text) can be injected into the draft.
+- **Your signature, automatically** -- on **new, reply and forward** drafts, your own email
+  signature (HTML or plain text) is injected into the draft. The signature file is resolved from
+  the account's `signaturePath` in `~/.karv/email-accounts.json` (an **absolute** path to an
+  `.html`/`.txt` file, or a folder holding one). HTML signatures keep embedded images (e.g.
+  `data:` URIs) inline. The server **owns the spacing**: it places the signature between your text
+  and the quoted history (or at the end of the body on new mail) with exactly one blank line --
+  the caller should not add its own signature or trailing blank lines.
 - **Attachment rules** -- replies carry only inline/embedded images; forwards carry all
   original attachments.
 - **Answered / Forwarded reconciliation** -- a draft you finish and send from your _own_ mail
@@ -110,7 +115,7 @@ while the AI still does the heavy lifting: triaging the inbox, reading, and draf
 - **App Passwords** -- no OAuth2 setup required for most providers
 - **5 composite tools** (plus `help` + `config__open_relay`) -- search, read, triage, draft, reply, forward, and credential setup in single calls
 - **Auto-discovery** -- provider settings detected from email address, custom IMAP host supported
-- **Thread-aware** -- reply/forward maintains In-Reply-To and References headers, quotes history, and can inject your signature
+- **Thread-aware** -- reply/forward maintains In-Reply-To and References headers, quotes history, and injects your signature (also on new drafts)
 - **Tiered token optimization** -- compressed descriptions + on-demand `help` tool + MCP Resources
 
 ## Install
@@ -173,7 +178,7 @@ Full docs at **[mcp.n24q02m.com/servers/better-email-mcp/setup/](https://mcp.n24
 | `messages` | `search`, `read`, `mark_read`, `mark_unread`, `flag`, `unflag`, `report_spam`, `reconcile` | Search, read, and triage emails; `reconcile` flags originals as answered/forwarded from your Sent folder (also available as `reconcile: true` on `search`). **No `move`/`archive`/`trash`** -- `report_spam` is the only move, and only to the spam folder. |
 | `folders` | `list` | List mailbox folders |
 | `attachments` | `list`, `download` | List and download email attachments |
-| `draft` | `new`, `reply`, `forward` | Compose, reply, and forward -- **always saved to Drafts, never sent.** Quotes history, optional signature injection, attachment rules. |
+| `draft` | `new`, `reply`, `forward` | Compose, reply, and forward -- **always saved to Drafts, never sent.** Quotes history, signature injection (new/reply/forward), attachment rules. |
 | `config` | `status`, `setup_start`, `setup_reset`, `setup_complete`, `set`, `cache_clear` | Credential setup via browser relay, status check, reset, re-resolve, cache clear |
 | `config__open_relay` | - | Open the relay configuration form in the browser and return the relay URL |
 | `help` | - | Get full documentation for any tool |

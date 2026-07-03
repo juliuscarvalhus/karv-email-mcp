@@ -158,9 +158,9 @@ export async function draft(accounts: AccountConfig[], input: DraftInput): Promi
       throw new EmailMCPError('body is required', 'VALIDATION_ERROR', 'Provide the email body text')
     }
 
-    // Apara linhas em branco no fim do corpo para nao SOMAR com o <br><br> que
-    // antecede a assinatura (o MCP e o dono do espacamento da assinatura). Sem
-    // isto, um corpo que ja termina em linha em branco gera espaco duplo.
+    // Normaliza o fim do corpo (tira linhas em branco sobrando). O espacamento
+    // antes da assinatura vem da margem do <p> que o marked gera em textToHtml -
+    // por isso NAO adicionamos <br> antes da assinatura (senao dobra).
     input.body = input.body.trimEnd()
 
     switch (input.action) {
@@ -196,7 +196,8 @@ async function handleNew(accounts: AccountConfig[], input: DraftInput): Promise<
   // Assinatura do e-mail (mesma logica de reply/forward): sem citacao, vai ao fim do corpo.
   const signature = getSignature(account.email)
   const bodyText = signature.text ? `${input.body}\n\n${signature.text}` : input.body
-  const bodyHtml = signature.html ? `${textToHtml(input.body)}<br><br>${signature.html}` : textToHtml(input.body)
+  // Sem <br> antes da assinatura: a margem do <p> (marked) ja da o espaco unico.
+  const bodyHtml = signature.html ? `${textToHtml(input.body)}${signature.html}` : textToHtml(input.body)
 
   const { saved, drafts_folder } = await saveDraft(account, {
     from: account.email,
@@ -283,7 +284,8 @@ async function handleReply(accounts: AccountConfig[], input: DraftInput): Promis
 
   // Formata o histórico em HTML (Usa o HTML original se disponível, senão converte do texto)
   const originalHtml = original.body_html || textToHtml(original.body_text)
-  const replyPrefixHtml = `<br><br>${signature.html ? signature.html + '<br><br>' : ''}Em ${originalDate}, ${originalSender} escreveu:<br><blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">${originalHtml}</blockquote>`
+  // Sem <br> inicial: a margem do <p> do corpo ja separa da assinatura/citacao.
+  const replyPrefixHtml = `${signature.html ? signature.html + '<br><br>' : ''}Em ${originalDate}, ${originalSender} escreveu:<br><blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">${originalHtml}</blockquote>`
   const bodyHtml = `${textToHtml(input.body)}${replyPrefixHtml}`
 
   // Anexos no responder: APENAS imagens inline/embedded (cid ou inline)
@@ -363,7 +365,8 @@ async function handleForward(accounts: AccountConfig[], input: DraftInput): Prom
 
   // Formata o histórico em HTML (Usa HTML original se disponível)
   const originalHtml = original.body_html || textToHtml(original.body_text)
-  const forwardHeaderHtml = `<br><br>${signature.html ? signature.html + '<br><br>' : ''}---------- Forwarded message ----------<br><b>De:</b> ${originalSender}<br><b>Data:</b> ${originalDate}<br><b>Assunto:</b> ${original.subject}<br><b>Para:</b> ${original.to}<br><br>${originalHtml}`
+  // Sem <br> inicial: a margem do <p> do corpo ja separa da assinatura/cabecalho.
+  const forwardHeaderHtml = `${signature.html ? signature.html + '<br><br>' : ''}---------- Forwarded message ----------<br><b>De:</b> ${originalSender}<br><b>Data:</b> ${originalDate}<br><b>Assunto:</b> ${original.subject}<br><b>Para:</b> ${original.to}<br><br>${originalHtml}`
   const bodyHtml = `${textToHtml(input.body)}${forwardHeaderHtml}`
 
   // Anexos no encaminhar: TODOS os anexos (inline + anexos de arquivo regulares)
