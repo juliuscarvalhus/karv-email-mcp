@@ -158,6 +158,11 @@ export async function draft(accounts: AccountConfig[], input: DraftInput): Promi
       throw new EmailMCPError('body is required', 'VALIDATION_ERROR', 'Provide the email body text')
     }
 
+    // Apara linhas em branco no fim do corpo para nao SOMAR com o <br><br> que
+    // antecede a assinatura (o MCP e o dono do espacamento da assinatura). Sem
+    // isto, um corpo que ja termina em linha em branco gera espaco duplo.
+    input.body = input.body.trimEnd()
+
     switch (input.action) {
       case 'new':
         return await handleNew(accounts, input)
@@ -188,14 +193,19 @@ async function handleNew(accounts: AccountConfig[], input: DraftInput): Promise<
 
   const account = resolveSingleAccount(accounts, input.account)
 
+  // Assinatura do e-mail (mesma logica de reply/forward): sem citacao, vai ao fim do corpo.
+  const signature = getSignature(account.email)
+  const bodyText = signature.text ? `${input.body}\n\n${signature.text}` : input.body
+  const bodyHtml = signature.html ? `${textToHtml(input.body)}<br><br>${signature.html}` : textToHtml(input.body)
+
   const { saved, drafts_folder } = await saveDraft(account, {
     from: account.email,
     to: input.to,
     cc: input.cc,
     bcc: input.bcc,
     subject: input.subject,
-    text: input.body,
-    html: textToHtml(input.body)
+    text: bodyText,
+    html: bodyHtml
   })
 
   return {
