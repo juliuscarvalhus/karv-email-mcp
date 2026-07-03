@@ -32,7 +32,7 @@ import { type AccountConfig, loadConfig, parseCredentials } from '../tools/helpe
 import { initiateOutlookDeviceCode, isOutlookDomain, setOutlookTokenStore } from '../tools/helpers/oauth2.js'
 import { registerTools } from '../tools/registry.js'
 
-const SERVER_NAME = 'better-email-mcp'
+const SERVER_NAME = 'karv-email-mcp'
 const IMAP_CONNECT_TIMEOUT_MS = 15_000
 
 /**

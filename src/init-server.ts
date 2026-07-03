@@ -19,7 +19,7 @@ import { resolveCredentialState } from './credential-state.js'
 import { loadConfig } from './tools/helpers/config.js'
 import { registerTools } from './tools/registry.js'
 
-const SERVER_NAME = 'better-email-mcp'
+const SERVER_NAME = 'karv-email-mcp'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

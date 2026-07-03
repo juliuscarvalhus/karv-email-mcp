@@ -21,7 +21,7 @@
 
 import { resolveConfig } from '@n24q02m/mcp-core/storage'
 
-const SERVER_NAME = 'better-email-mcp'
+const SERVER_NAME = 'karv-email-mcp'
 const REQUIRED_FIELDS = ['EMAIL_CREDENTIALS']
 
 export type CredentialState = 'awaiting_setup' | 'setup_in_progress' | 'configured'
